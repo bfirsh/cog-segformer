@@ -35,5 +35,5 @@ class Predictor(BasePredictor):
             if cls not in class_names:
                 class_names[cls] = self.model.config.id2label[cls]
 
-        return {"labels": labels, "class_names": class_names}
+        return {"class_names": class_names, "labels": labels}
 
