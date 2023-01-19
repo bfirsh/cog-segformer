@@ -1,39 +1,42 @@
-from transformers import SegformerFeatureExtractor, SegformerForSemanticSegmentation
+from transformers import (
+    SegformerFeatureExtractor,
+    SegformerForSemanticSegmentation,
+    ImageSegmentationPipeline,
+)
 from PIL import Image
-from cog import BasePredictor, Input, Path
+from cog import BasePredictor, Input, Path, BaseModel, File
 import torch
+import io
 from torch import nn
-from typing import Any
+from typing import Any, List
+
+
+class Segment(BaseModel):
+    score: Any
+    label: str
+    mask: File
 
 
 class Predictor(BasePredictor):
     def setup(self):
-        self.feature_extractor = SegformerFeatureExtractor.from_pretrained(
+        feature_extractor = SegformerFeatureExtractor.from_pretrained(
             "nvidia/segformer-b0-finetuned-ade-512-512"
         )
-        self.model = SegformerForSemanticSegmentation.from_pretrained(
+        model = SegformerForSemanticSegmentation.from_pretrained(
             "nvidia/segformer-b0-finetuned-ade-512-512"
         )
-
-    def predict(self, image: Path) -> Any:
-        image_obj = Image.open(image)
-        inputs = self.feature_extractor(images=image_obj, return_tensors="pt")
-        with torch.no_grad():
-            logits = self.model(**inputs).logits
-
-        upsampled_logits = nn.functional.interpolate(
-            logits,
-            size=image_obj.size[::-1],
-            mode="bilinear",
+        self.image_segmenter = ImageSegmentationPipeline(
+            model=model, feature_extractor=feature_extractor
         )
-        upsampled_predictions = upsampled_logits.argmax(dim=1) + 1
-        labels = upsampled_predictions.flatten().tolist()
 
-        class_names = {}
-
-        for cls in set(labels):
-            if cls not in class_names:
-                class_names[cls] = self.model.config.id2label[cls]
-
-        return {"class_names": class_names, "labels": labels}
+    def predict(self, image: Path) -> List[Segment]:
+        output = self.image_segmenter(Image.open(image))
+        for segment in output:
+            image = segment["mask"]
+            b = io.BytesIO()
+            b.name = "image.png"
+            image.save(b, "png")
+            b.seek(0)
+            segment["mask"] = b
+        return output
 
